@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_service.dart';
 import 'dashboard_screen.dart';
 import 'charts_screen.dart';
 import 'calendar_page.dart';
@@ -12,25 +12,42 @@ class NavigationScreen extends StatefulWidget {
 class _NavigationScreenState extends State<NavigationScreen> {
   int _selectedIndex = 0;
 
-  final List<Widget> _screens = [
-    DashboardScreen(),
-    ChartsScreen(),
-    CalendarPage(allJobs: []),
-  ];
+  final List<Widget> _screens = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshScreens();
+  }
+
+  void _refreshScreens() {
+    _screens
+      ..clear()
+      ..addAll([
+        DashboardScreen(onJobChanged: _onJobChanged),
+        ChartsScreen(),
+        CalendarPage(),
+      ]);
+  }
+
+  void _onJobChanged() {
+    setState(() {
+      _refreshScreens();
+    });
+  }
 
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
     });
-    Navigator.pop(context); // Close the drawer after selection
+    Navigator.pop(context);
   }
 
   Future<void> _logout() async {
     try {
-      await FirebaseAuth.instance.signOut();
-      Navigator.pushReplacementNamed(context, '/login'); // Navigate to login screen
+      await AuthService().signOut();
+      Navigator.pushReplacementNamed(context, '/login');
     } catch (e) {
-      // Show error message if logout fails
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error logging out. Please try again.'),
@@ -42,9 +59,8 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Get current user information
-    User? user = FirebaseAuth.instance.currentUser;
-    String userEmail = user?.email ?? 'User';
+    final user = AuthService().currentUser;
+    final userEmail = user?['email'] ?? 'User';
 
     return Scaffold(
       appBar: AppBar(
@@ -103,7 +119,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
                 ],
               ),
             ),
-            Divider(), // Visual separation
+            Divider(),
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: ElevatedButton(

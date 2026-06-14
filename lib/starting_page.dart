@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_service.dart';
 import 'navigation.dart';
 
 class StartingPage extends StatefulWidget {
@@ -11,21 +11,13 @@ class _StartingPageState extends State<StartingPage> {
   @override
   void initState() {
     super.initState();
-    // Check if user is already logged in
     _checkCurrentUser();
   }
 
   Future<void> _checkCurrentUser() async {
-    // Add a short delay to ensure the widget is mounted
     await Future.delayed(Duration.zero);
-    
-    // Check if the context is still mounted before proceeding
     if (!mounted) return;
-    
-    // Check if user is already logged in
-    User? user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      // User is already logged in, navigate to NavigationScreen
+    if (AuthService().currentUser != null) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (context) => NavigationScreen()),
       );

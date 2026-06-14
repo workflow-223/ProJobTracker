@@ -1,149 +1,73 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'database_service.dart';
+
+class AuthException implements Exception {
+  final String code;
+  AuthException(this.code);
+}
 
 class AuthService {
-  // Create singleton instance
   static final AuthService _instance = AuthService._internal();
   factory AuthService() => _instance;
   AuthService._internal();
 
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['https://www.googleapis.com/auth/calendar.events.readonly']);
-  final storage = const FlutterSecureStorage();
+  Map<String, dynamic>? _currentUser;
 
-  // Get current user
-  User? get currentUser => _auth.currentUser;
+  Map<String, dynamic>? get currentUser => _currentUser;
+  String? get userEmail => _currentUser?['email'] as String?;
+  int? get userId => _currentUser?['id'] as int?;
 
-  // Auth state changes stream
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
-
-  // Sign in with email and password
-  Future<UserCredential> signInWithEmailAndPassword(String email, String password) {
-    return _auth.signInWithEmailAndPassword(email: email, password: password);
+  Future<void> init() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('current_user_id');
+    if (userId != null) {
+      _currentUser = await DatabaseService.getUserById(userId);
+    }
   }
 
-  // Create user with email and password
-  Future<UserCredential> createUserWithEmailAndPassword(
-    String email, 
-    String password, 
-    String firstName, 
-    String lastName
+  Future<void> _saveLoginState() async {
+    if (_currentUser == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('current_user_id', _currentUser!['id'] as int);
+  }
+
+  Future<void> signInWithEmailAndPassword(String email, String password) async {
+    final hash = sha256.convert(utf8.encode(password)).toString();
+    final user = await DatabaseService.getUserByEmail(email);
+    if (user == null) throw AuthException('user-not-found');
+    if (user['password_hash'] != hash) throw AuthException('wrong-password');
+    _currentUser = user;
+    await _saveLoginState();
+  }
+
+  Future<void> createUserWithEmailAndPassword(
+    String email,
+    String password,
+    String firstName,
+    String lastName,
   ) async {
-    // Create the user
-    UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-
-    // Save additional user data to Firestore
-    await _firestore.collection('users').doc(userCredential.user!.uid).set({
-      'firstName': firstName,
-      'lastName': lastName,
-      'email': email,
-      'createdAt': FieldValue.serverTimestamp(),
-      'authProvider': 'email',  // Indicate auth method
-    });
-
-    return userCredential;
+    final existing = await DatabaseService.getUserByEmail(email);
+    if (existing != null) throw AuthException('email-already-in-use');
+    final hash = sha256.convert(utf8.encode(password)).toString();
+    final id = await DatabaseService.createUser(email, hash, firstName, lastName);
+    _currentUser = await DatabaseService.getUserById(id);
+    await _saveLoginState();
   }
 
-  // Sign in with Google
-  Future<UserCredential?> signInWithGoogle() async {
-    try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null; // User canceled sign-in
-
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      // Sign in to Firebase with Google credentials
-      final UserCredential userCredential = await _auth.signInWithCredential(credential);
-      final User? user = userCredential.user;
-
-      if (user != null) {
-        // Store access token securely
-        await storage.write(key: 'google_access_token', value: googleAuth.accessToken);
-
-        // Check if user exists in Firestore
-        DocumentSnapshot userDoc = await _firestore.collection('users').doc(user.uid).get();
-        if (!userDoc.exists) {
-          // New user, save to Firestore
-          await _firestore.collection('users').doc(user.uid).set({
-            'firstName': user.displayName?.split(" ").first ?? '',
-            'lastName': user.displayName?.split(" ").last ?? '',
-            'email': user.email,
-            'createdAt': FieldValue.serverTimestamp(),
-            'authProvider': 'google',  // Indicate auth method
-          });
-        }
-      }
-      return userCredential;
-    } catch (e) {
-      print("Google Sign-In Error: $e");
-      return null;
-    }
-  }
-
-  // Link Google account to existing email/password account
-  Future<void> linkGoogleAccount() async {
-    try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return;
-
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      // Link Google credential to existing Firebase account
-      await _auth.currentUser?.linkWithCredential(credential);
-
-      // Update Firestore with provider info
-      await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
-        'authProvider': 'email_google',
-      });
-
-      // Store access token securely
-      await storage.write(key: 'google_access_token', value: googleAuth.accessToken);
-    } catch (e) {
-      print("Error linking Google account: $e");
-    }
-  }
-
-  // Sign out
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
-    await _auth.signOut();
-    await storage.delete(key: 'google_access_token');
+    _currentUser = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('current_user_id');
   }
 
-  // Send password reset email
-  Future<void> sendPasswordResetEmail(String email) async {
-    return await _auth.sendPasswordResetEmail(email: email);
-  }
-
-  // Get user data from Firestore
   Future<Map<String, dynamic>?> getUserData() async {
-    User? user = _auth.currentUser;
-    if (user != null) {
-      DocumentSnapshot doc = await _firestore.collection('users').doc(user.uid).get();
-      return doc.data() as Map<String, dynamic>?;
-    }
-    return null;
-  }
-
-  // Update user profile
-  Future<void> updateUserProfile(Map<String, dynamic> data) async {
-    User? user = _auth.currentUser;
-    if (user != null) {
-      await _firestore.collection('users').doc(user.uid).update(data);
-    }
+    if (_currentUser == null) return null;
+    return {
+      'firstName': _currentUser!['first_name'],
+      'lastName': _currentUser!['last_name'],
+      'email': _currentUser!['email'],
+    };
   }
 }

@@ -1,33 +1,47 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'auth_service.dart';
+import 'database_service.dart';
 
 class CalendarPage extends StatefulWidget {
-  final List<Map<String, String>> allJobs;
-
-  CalendarPage({required this.allJobs});
+  CalendarPage({super.key});
 
   @override
   _CalendarPageState createState() => _CalendarPageState();
 }
 
 class _CalendarPageState extends State<CalendarPage> {
-  late Map<DateTime, List<Map<String, String>>> _jobsByDate;
+  late Map<DateTime, List<Map<String, dynamic>>> _jobsByDate;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
     _selectedDay = _focusedDay;
-    _jobsByDate = _groupJobsByDeadline(widget.allJobs);
+    _loadJobs();
   }
 
-  Map<DateTime, List<Map<String, String>>> _groupJobsByDeadline(List<Map<String, String>> jobs) {
-    Map<DateTime, List<Map<String, String>>> jobsMap = {};
+  Future<void> _loadJobs() async {
+    final userId = AuthService().userId;
+    if (userId == null) return;
+
+    final jobs = await DatabaseService.getJobsByUserId(userId);
+    setState(() {
+      _jobsByDate = _groupJobsByDeadline(jobs);
+      _loading = false;
+    });
+  }
+
+  Map<DateTime, List<Map<String, dynamic>>> _groupJobsByDeadline(List<Map<String, dynamic>> jobs) {
+    Map<DateTime, List<Map<String, dynamic>>> jobsMap = {};
 
     for (var job in jobs) {
       try {
-        DateTime deadline = DateTime.parse(job['deadline']!.replaceAll('/', '-'));
+        final deadlineStr = job['deadline'] as String?;
+        if (deadlineStr == null) continue;
+        DateTime deadline = DateTime.parse(deadlineStr.replaceAll('/', '-'));
         DateTime normalized = DateTime(deadline.year, deadline.month, deadline.day);
         if (!jobsMap.containsKey(normalized)) {
           jobsMap[normalized] = [];
@@ -41,7 +55,7 @@ class _CalendarPageState extends State<CalendarPage> {
     return jobsMap;
   }
 
-  List<Map<String, String>> _getJobsForDay(DateTime day) {
+  List<Map<String, dynamic>> _getJobsForDay(DateTime day) {
     return _jobsByDate[DateTime(day.year, day.month, day.day)] ?? [];
   }
 
@@ -62,61 +76,67 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(title: Text("Calendar")),
       body: Column(
         children: [
-        TableCalendar(
-          firstDay: DateTime.utc(2023, 1, 1),
-          lastDay: DateTime.utc(2030, 12, 31),
-          focusedDay: _focusedDay,
-          selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-          eventLoader: _getJobsForDay,
-          onDaySelected: (selectedDay, focusedDay) {
-            setState(() {
-              _selectedDay = selectedDay;
-              _focusedDay = focusedDay;
-            });
-          },
-          calendarFormat: CalendarFormat.month,
-          availableCalendarFormats: const {
-            CalendarFormat.month: '',
-          },
-          calendarStyle: CalendarStyle(
-            selectedDecoration: BoxDecoration(
-              color: Colors.green,
-              shape: BoxShape.circle,
-            ),
-            todayDecoration: BoxDecoration(
-              color: Colors.orange,
-              shape: BoxShape.circle,
-            ),
-            markerDecoration: BoxDecoration(
-              color: Colors.blue,
-              shape: BoxShape.circle,
-            ),
-          ),
-          calendarBuilders: CalendarBuilders(
-            markerBuilder: (context, date, events) {
-              if (isSameDay(date, _selectedDay)) return SizedBox.shrink();
-
-              if (events.isNotEmpty) {
-                return Positioned(
-                  bottom: 1,
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: Colors.blue,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                );
-              }
-              return SizedBox.shrink();
+          TableCalendar(
+            firstDay: DateTime.utc(2023, 1, 1),
+            lastDay: DateTime.utc(2030, 12, 31),
+            focusedDay: _focusedDay,
+            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+            eventLoader: _getJobsForDay,
+            onDaySelected: (selectedDay, focusedDay) {
+              setState(() {
+                _selectedDay = selectedDay;
+                _focusedDay = focusedDay;
+              });
             },
+            calendarFormat: CalendarFormat.month,
+            availableCalendarFormats: const {
+              CalendarFormat.month: '',
+            },
+            calendarStyle: CalendarStyle(
+              selectedDecoration: BoxDecoration(
+                color: Colors.green,
+                shape: BoxShape.circle,
+              ),
+              todayDecoration: BoxDecoration(
+                color: Colors.orange,
+                shape: BoxShape.circle,
+              ),
+              markerDecoration: BoxDecoration(
+                color: Colors.blue,
+                shape: BoxShape.circle,
+              ),
+            ),
+            calendarBuilders: CalendarBuilders(
+              markerBuilder: (context, date, events) {
+                if (isSameDay(date, _selectedDay)) return SizedBox.shrink();
+
+                if (events.isNotEmpty) {
+                  return Positioned(
+                    bottom: 1,
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  );
+                }
+                return SizedBox.shrink();
+              },
+            ),
           ),
-        ),
 
           const SizedBox(height: 12),
           Expanded(
@@ -126,6 +146,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 itemCount: _getJobsForDay(_selectedDay!).length,
                 itemBuilder: (context, index) {
                   final job = _getJobsForDay(_selectedDay!)[index];
+                  final status = job['status'] as String? ?? '';
                   return Card(
                     margin: EdgeInsets.only(bottom: 16),
                     elevation: 4,
@@ -138,7 +159,7 @@ class _CalendarPageState extends State<CalendarPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            job['title'] ?? '',
+                            job['position'] ?? '',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -149,7 +170,7 @@ class _CalendarPageState extends State<CalendarPage> {
                           Text('Company: ${job['company']}',
                               style: TextStyle(color: Colors.grey[700])),
                           SizedBox(height: 4),
-                          Text('Date Applied: ${job['dateApplied']}',
+                          Text('Date Applied: ${job['date_applied']}',
                               style: TextStyle(color: Colors.grey[700])),
                           SizedBox(height: 4),
                           Text('Deadline: ${job['deadline']}',
@@ -159,11 +180,11 @@ class _CalendarPageState extends State<CalendarPage> {
                             padding: EdgeInsets.symmetric(
                                 vertical: 4, horizontal: 12),
                             decoration: BoxDecoration(
-                              color: _getStatusColor(job['status'] ?? ''),
+                              color: _getStatusColor(status),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              job['status'] ?? '',
+                              status,
                               style: TextStyle(color: Colors.white),
                             ),
                           ),

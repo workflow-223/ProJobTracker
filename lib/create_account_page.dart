@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'login_page.dart';
+import 'auth_service.dart';
+import 'navigation.dart';
 
 class CreateAccountPage extends StatefulWidget {
   @override
@@ -19,9 +18,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   bool _isLoading = false;
   String _errorMessage = '';
 
-  // Firebase instances
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final AuthService _authService = AuthService();
 
   @override
   void dispose() {
@@ -41,28 +38,20 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       });
 
       try {
-        // Create user with email and password
-        UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
+        await _authService.createUserWithEmailAndPassword(
+          _emailController.text.trim(),
+          _passwordController.text,
+          _firstNameController.text,
+          _lastNameController.text,
         );
 
-        // Save additional user information to Firestore
-        await _firestore.collection('users').doc(userCredential.user!.uid).set({
-          'firstName': _firstNameController.text,
-          'lastName': _lastNameController.text,
-          'email': _emailController.text.trim(),
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
-        // Navigate to LoginPage after successful account creation
         if (mounted) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => LoginPage()),
+            MaterialPageRoute(builder: (context) => NavigationScreen()),
           );
         }
-      } on FirebaseAuthException catch (e) {
+      } on AuthException catch (e) {
         setState(() {
           _errorMessage = _getErrorMessage(e.code);
         });
@@ -86,8 +75,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         return 'An account already exists for this email.';
       case 'invalid-email':
         return 'The email address is not valid.';
-      case 'operation-not-allowed':
-        return 'Email/password accounts are not enabled.';
       case 'weak-password':
         return 'The password is too weak.';
       default:
@@ -217,7 +204,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
               SizedBox(height: 20),
               TextButton(
                 onPressed: () {
-                  // Navigate back to the login page
                   Navigator.pop(context);
                 },
                 child: Text('Already have an account? Log in'),

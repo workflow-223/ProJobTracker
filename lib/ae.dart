@@ -1,9 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-// import 'package:file_picker/file_picker.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_service.dart';
+import 'database_service.dart';
 
 class AddEditJobScreen extends StatefulWidget {
   final Map<String, dynamic>? job;
@@ -29,20 +26,8 @@ class _AddEditJobScreenState extends State<AddEditJobScreen> {
   final _statusController = TextEditingController();
   final _salaryController = TextEditingController();
 
-  // // For new file selections
-  // PlatformFile? _resumeFile;
-  // PlatformFile? _coverLetterFile;
-
-  // // For existing attachments (when editing)
-  // String? _existingResumeUrl;
-  // String? _existingCoverLetterUrl;
-
   bool _isSubmitting = false;
   bool _isButtonDisabled = false;
-
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
 
   @override
   void initState() {
@@ -55,12 +40,8 @@ class _AddEditJobScreenState extends State<AddEditJobScreen> {
       _notesController.text = widget.job!['notes'] ?? '';
       _statusController.text = widget.job!['status'] ?? 'Applied';
       _salaryController.text = widget.job!['salary']?.toString() ?? '';
-      
-      // // Retrieve existing file URLs if available
-      // _existingResumeUrl = widget.job!['resumeUrl'];
-      // _existingCoverLetterUrl = widget.job!['coverLetterUrl'];
     } else {
-      _statusController.text = 'Applied'; // Set default for new jobs
+      _statusController.text = 'Applied';
     }
   }
 
@@ -76,30 +57,7 @@ class _AddEditJobScreenState extends State<AddEditJobScreen> {
     super.dispose();
   }
 
-  // // Helper method to upload a file and return its download URL.
-  // Future<String?> _uploadFile(PlatformFile file, String folder) async {
-  //   try {
-  //     final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.name}';
-  //     final storageRef = _storage.ref().child('$folder/$fileName');
-
-  //     if (file.bytes != null) {
-  //       await storageRef.putData(file.bytes!);
-  //     } else if (file.path != null) {
-  //       await storageRef.putFile(File(file.path!));
-  //     } else {
-  //       throw Exception('No file data available');
-  //     }
-
-  //     final downloadUrl = await storageRef.getDownloadURL();
-  //     return downloadUrl;
-  //   } catch (e) {
-  //     debugPrint('File upload error: $e');
-  //     return null;
-  //   }
-  // }
-
   Future<void> _submitForm() async {
-    // Prevent multiple submissions
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
     
     setState(() => _isSubmitting = true);
@@ -115,47 +73,52 @@ class _AddEditJobScreenState extends State<AddEditJobScreen> {
         return;
       }
 
-      final user = _auth.currentUser;
-      if (user == null) throw Exception('User not authenticated');
+      final userId = AuthService().userId;
+      if (userId == null) throw Exception('User not authenticated');
 
-      final newJob = {
-        'company': _companyController.text,
-        'position': _positionController.text,
-        'dateApplied': _dateAppliedController.text,
-        'deadline': _deadlineController.text,
-        'notes': _notesController.text,
-        'status': _statusController.text, // Ensure status is included
-        'email': user.email,
-        'salary': _salaryController.text.isNotEmpty 
-            ? double.tryParse(_salaryController.text) ?? 0 
-            : 0,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-        'userID': user.uid,
-      };
-
-
-      // For debugging
-      debugPrint('Submitting job with status: ${newJob['status']}');
+      final now = DateTime.now().toIso8601String().substring(0, 19).replaceFirst('T', ' ');
 
       if (widget.job != null && widget.job!.containsKey('id')) {
-        await _firestore.collection('jobs').doc(widget.job!['id']).update(newJob);
+        final jobId = int.parse(widget.job!['id']);
+        await DatabaseService.updateJob(jobId, {
+          'company': _companyController.text,
+          'position': _positionController.text,
+          'date_applied': _dateAppliedController.text,
+          'deadline': _deadlineController.text,
+          'notes': _notesController.text,
+          'status': _statusController.text,
+          'salary': _salaryController.text.isNotEmpty
+              ? double.tryParse(_salaryController.text) ?? 0
+              : 0,
+          'updated_at': now,
+        });
       } else {
-        // Check for existing identical job
-        final query = await _firestore.collection('jobs')
-            .where('company', isEqualTo: newJob['company'])
-            .where('position', isEqualTo: newJob['position'])
-            .limit(1)
-            .get();
-
-        if (query.docs.isEmpty) {
-          await _firestore.collection('jobs').add(newJob);
-        } else {
+        final exists = await DatabaseService.jobExists(
+          userId,
+          _companyController.text,
+          _positionController.text,
+        );
+        if (exists) {
           throw Exception('This job already exists in your applications');
         }
+
+        await DatabaseService.addJob({
+          'user_id': userId,
+          'company': _companyController.text,
+          'position': _positionController.text,
+          'date_applied': _dateAppliedController.text,
+          'deadline': _deadlineController.text,
+          'notes': _notesController.text,
+          'status': _statusController.text,
+          'salary': _salaryController.text.isNotEmpty
+              ? double.tryParse(_salaryController.text) ?? 0
+              : 0,
+          'created_at': now,
+          'updated_at': now,
+        });
       }
 
-      widget.onSubmit(newJob);
+      widget.onSubmit({});
       if (mounted) Navigator.pop(context);
     } catch (e) {
       debugPrint('Submission error: $e');
@@ -168,29 +131,6 @@ class _AddEditJobScreenState extends State<AddEditJobScreen> {
       if (mounted) setState(() => _isSubmitting = false);
     }
   }
-
-  // Future<void> _pickFile(bool isResume) async {
-  //   try {
-  //     FilePickerResult? result = await FilePicker.platform.pickFiles(
-  //       withData: true, // Ensure file bytes are loaded
-  //       type: FileType.custom,
-  //       allowedExtensions: ['pdf', 'doc', 'docx'],
-  //     );
-  //     if (result != null) {
-  //       setState(() {
-  //         if (isResume) {
-  //           _resumeFile = result.files.first;
-  //         } else {
-  //           _coverLetterFile = result.files.first;
-  //         }
-  //       });
-  //     }
-  //   } catch (e) {
-  //     ScaffoldMessenger.of(context).showSnackBar(
-  //       SnackBar(content: Text('Error picking file: ${e.toString()}')),
-  //     );
-  //   }
-  // }
 
   Future<void> _selectDate(BuildContext context, String field) async {
     final DateTime? picked = await showDatePicker(
@@ -212,12 +152,6 @@ class _AddEditJobScreenState extends State<AddEditJobScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // // Determine text to display for attachments.
-    // final resumeAttachmentText = _resumeFile?.name ??
-    //     (_existingResumeUrl != null ? 'Resume Uploaded' : 'No file selected');
-    // final coverLetterAttachmentText = _coverLetterFile?.name ??
-    //     (_existingCoverLetterUrl != null ? 'Cover Letter Uploaded' : 'No file selected');
-
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.job == null ? 'Add Job' : 'Edit Job'),
@@ -299,7 +233,7 @@ class _AddEditJobScreenState extends State<AddEditJobScreen> {
                 keyboardType: TextInputType.numberWithOptions(decimal: true),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
-                    return null; // Salary is optional
+                    return null;
                   }
                   if (double.tryParse(value) == null) {
                     return 'Please enter a valid number';
@@ -335,24 +269,6 @@ class _AddEditJobScreenState extends State<AddEditJobScreen> {
                 decoration: InputDecoration(labelText: 'Notes'),
                 maxLines: 3,
               ),
-              SizedBox(height: 16),
-              // Text('Attachments:', style: TextStyle(fontSize: 16)),
-              // ListTile(
-              //   title: Text('Resume'),
-              //   subtitle: Text(resumeAttachmentText),
-              //   trailing: IconButton(
-              //     icon: Icon(Icons.attach_file),
-              //     onPressed: () => _pickFile(true),
-              //   ),
-              // ),
-              // ListTile(
-              //   title: Text('Cover Letter'),
-              //   subtitle: Text(coverLetterAttachmentText),
-              //   trailing: IconButton(
-              //     icon: Icon(Icons.attach_file),
-              //     onPressed: () => _pickFile(false),
-              //   ),
-              // ),
               SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _isButtonDisabled

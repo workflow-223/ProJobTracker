@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_service.dart';
+import 'database_service.dart';
 
 class ChartsScreen extends StatefulWidget {
   const ChartsScreen({super.key});
@@ -18,9 +18,98 @@ class _ChartsScreenState extends State<ChartsScreen> {
   @override
   void initState() {
     super.initState();
-    _applicationStatusFuture = FirestoreDatabase.fetchApplicationStatusData();
-    _positionsAppliedFuture = FirestoreDatabase.fetchPositionsAppliedData();
-    _barDataFuture = FirestoreDatabase.fetchBarData();
+    _applicationStatusFuture = _fetchApplicationStatusData();
+    _positionsAppliedFuture = _fetchPositionsAppliedData();
+    _barDataFuture = _fetchBarData();
+  }
+
+  Future<List<PieChartSectionData>> _fetchApplicationStatusData() async {
+    final userId = AuthService().userId;
+    if (userId == null) return [];
+
+    final rows = await DatabaseService.getStatusCounts(userId);
+    if (rows.isEmpty) return [];
+
+    final total = rows.fold<int>(0, (sum, r) => sum + (r['count'] as int));
+    final colorMap = {
+      'Applied': const Color(0xFFFF6FCF),
+      'Interviewed': const Color(0xFFD691FF),
+      'Rejected': const Color(0xFFFFA500),
+      'Accepted': const Color(0xFFB2FF59),
+    };
+
+    return rows.map((row) {
+      final status = row['status'] as String;
+      final count = row['count'] as int;
+      final percentage = (count / total) * 100;
+      return PieChartSectionData(
+        value: percentage,
+        color: colorMap[status] ?? Colors.grey,
+        title: '${percentage.toStringAsFixed(0)}%',
+        radius: 50,
+        titleStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+      );
+    }).toList();
+  }
+
+  Future<List<PieChartSectionData>> _fetchPositionsAppliedData() async {
+    final userId = AuthService().userId;
+    if (userId == null) return [];
+
+    final rows = await DatabaseService.getPositionCounts(userId);
+    if (rows.isEmpty) return [];
+
+    final total = rows.fold<int>(0, (sum, r) => sum + (r['count'] as int));
+    final colorPalette = [
+      const Color(0xFF42A5F5),
+      const Color(0xFFCE93D8),
+      const Color(0xFFFFB74D),
+      const Color(0xFF9CCC65),
+      const Color(0xFFBDBDBD),
+    ];
+
+    return rows.asMap().entries.map((entry) {
+      final row = entry.value;
+      final count = row['count'] as int;
+      final percentage = (count / total) * 100;
+      return PieChartSectionData(
+        value: percentage,
+        color: colorPalette[entry.key % colorPalette.length],
+        title: '${percentage.toStringAsFixed(0)}%',
+        radius: 50,
+        titleStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+      );
+    }).toList();
+  }
+
+  Future<List<BarChartGroupData>> _fetchBarData() async {
+    final userId = AuthService().userId;
+    if (userId == null) return [];
+
+    final rows = await DatabaseService.getAvgSalaryByPosition(userId);
+    if (rows.isEmpty) return [];
+
+    final colorPalette = [
+      const Color(0xFF42A5F5),
+      const Color(0xFFCE93D8),
+      const Color(0xFFFFB74D),
+      const Color(0xFF9CCC65),
+      const Color(0xFFBDBDBD),
+    ];
+
+    return rows.asMap().entries.map((entry) {
+      final row = entry.value;
+      final avgSalary = (row['avg_salary'] as num?)?.toDouble() ?? 0;
+      return BarChartGroupData(
+        x: entry.key,
+        barRods: [
+          BarChartRodData(
+            toY: avgSalary / 1000,
+            color: colorPalette[entry.key % colorPalette.length],
+          ),
+        ],
+      );
+    }).toList();
   }
 
   @override
@@ -35,17 +124,6 @@ class _ChartsScreenState extends State<ChartsScreen> {
               const Text('Application Status',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: const [
-                  LegendItem(color: Color(0xFFFF6FCF), label: 'Applied'),
-                  LegendItem(color: Color(0xFFD691FF), label: 'Interviews'),
-                  LegendItem(color: Color(0xFFFFA500), label: 'Rejected'),
-                  LegendItem(color: Color(0xFFFFFF99), label: 'Accepted'),
-                ],
-              ),
-              const SizedBox(height: 16),
               FutureBuilder<List<PieChartSectionData>>(
                 future: _applicationStatusFuture,
                 builder: (context, snapshot) {
@@ -74,18 +152,6 @@ class _ChartsScreenState extends State<ChartsScreen> {
               const SizedBox(height: 32),
               const Text('Positions Applied',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: const [
-                  LegendItem(color: Color(0xFF42A5F5), label: 'Software Developer'),
-                  LegendItem(color: Color(0xFFCE93D8), label: 'AI/ML Engineer'),
-                  LegendItem(color: Color(0xFFFFB74D), label: 'Data Science'),
-                  LegendItem(color: Color(0xFF9CCC65), label: 'Data Engineer'),
-                  LegendItem(color: Color(0xFFBDBDBD), label: 'Other'),
-                ],
-              ),
               const SizedBox(height: 16),
               FutureBuilder<List<PieChartSectionData>>(
                 future: _positionsAppliedFuture,
@@ -115,18 +181,6 @@ class _ChartsScreenState extends State<ChartsScreen> {
               const SizedBox(height: 32),
               const Text('Average Salaries',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: const [
-                  LegendItem(color: Color(0xFF42A5F5), label: 'Software Developer'),
-                  LegendItem(color: Color(0xFFCE93D8), label: 'AI/ML Engineer'),
-                  LegendItem(color: Color(0xFFFFB74D), label: 'Data Science'),
-                  LegendItem(color: Color(0xFF9CCC65), label: 'Data Engineer'),
-                  LegendItem(color: Color(0xFFBDBDBD), label: 'Other'),
-                ],
-              ),
               const SizedBox(height: 16),
               FutureBuilder<List<BarChartGroupData>>(
                 future: _barDataFuture,
@@ -151,24 +205,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
                       titlesData: FlTitlesData(
                         bottomTitles: AxisTitles(
                           sideTitles: SideTitles(
-                            reservedSize: 50,
-                            showTitles: true,
-                            getTitlesWidget: (value, meta) {
-                              final style = const TextStyle(fontSize: 11);
-                              switch (value.toInt()) {
-                                case 0:
-                                  return Text('Software\nEng', style: style);
-                                case 1:
-                                  return Text('AI/ML\nEng', style: style);
-                                case 2:
-                                  return Text('Data\nScience', style: style);
-                                case 3:
-                                  return Text('Data\nEng', style: style);
-                                case 4:
-                                  return Text('Other', style: style);
-                              }
-                              return const SizedBox.shrink();
-                            },
+                            showTitles: false,
                           ),
                         ),
                         leftTitles: AxisTitles(
@@ -194,158 +231,6 @@ class _ChartsScreenState extends State<ChartsScreen> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class FirestoreDatabase {
-  static Future<List<PieChartSectionData>> fetchApplicationStatusData() async {
-    final userEmail = FirebaseAuth.instance.currentUser?.email;
-    if (userEmail == null) return [];
-
-    final snapshot = await FirebaseFirestore.instance
-        .collection('jobs')
-        .where('email', isEqualTo: userEmail)
-        .get();
-
-    final statusCounts = <String, int>{};
-
-    for (var doc in snapshot.docs) {
-      final status = doc['status'] ?? 'Other';
-      statusCounts[status] = (statusCounts[status] ?? 0) + 1;
-    }
-
-    if (statusCounts.isEmpty) return [];
-    
-    final total = statusCounts.values.fold(0, (sum, val) => sum + val);
-    final colorMap = {
-      'Applied': Color(0xFFFF6FCF),
-      'Interviews': Color(0xFFD691FF),
-      'Rejected': Color(0xFFFFA500),
-      'Accepted': Color(0xFFFFFF99),
-    };
-
-    return statusCounts.entries.map((entry) {
-      final percentage = (entry.value / total) * 100;
-      return PieChartSectionData(
-        value: percentage,
-        color: colorMap[entry.key] ?? Colors.grey,
-        title: '${percentage.toStringAsFixed(0)}%',
-        radius: 50,
-        titleStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-      );
-    }).toList();
-  }
-
-  static Future<List<PieChartSectionData>> fetchPositionsAppliedData() async {
-    final userEmail = FirebaseAuth.instance.currentUser?.email;
-    if (userEmail == null) return [];
-
-    final snapshot = await FirebaseFirestore.instance
-        .collection('jobs')
-        .where('email', isEqualTo: userEmail)
-        .get();
-
-    final positionCounts = <String, int>{};
-
-    for (var doc in snapshot.docs) {
-      final position = doc['position'] ?? 'Other';
-      positionCounts[position] = (positionCounts[position] ?? 0) + 1;
-    }
-
-    if (positionCounts.isEmpty) return [];
-    
-    final total = positionCounts.values.fold(0, (sum, val) => sum + val);
-    final colorMap = {
-      'Software Developer': Color(0xFF42A5F5),
-      'AI/ML Engineer': Color(0xFFCE93D8),
-      'Data Science': Color(0xFFFFB74D),
-      'Data Engineer': Color(0xFF9CCC65),
-    };
-
-    return positionCounts.entries.map((entry) {
-      final percentage = (entry.value / total) * 100;
-      return PieChartSectionData(
-        value: percentage,
-        color: colorMap[entry.key] ?? Color(0xFFBDBDBD),
-        title: '${percentage.toStringAsFixed(0)}%',
-        radius: 50,
-        titleStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-      );
-    }).toList();
-  }
-
-  static Future<List<BarChartGroupData>> fetchBarData() async {
-    final userEmail = FirebaseAuth.instance.currentUser?.email;
-    if (userEmail == null) return [];
-
-    final snapshot = await FirebaseFirestore.instance
-        .collection('jobs')
-        .where('email', isEqualTo: userEmail)
-        .get();
-
-    // If no jobs with salaries are found, return an empty list
-    if (snapshot.docs.isEmpty) return [];
-    
-    final salarySums = <String, double>{};
-    final count = <String, int>{};
-
-    for (var doc in snapshot.docs) {
-      final position = doc['position'] ?? 'Other';
-      final rawSalary = doc['salary'];
-      if (rawSalary == null || rawSalary is! num) continue;
-
-      final salary = rawSalary.toDouble();
-      salarySums[position] = (salarySums[position] ?? 0) + salary;
-      count[position] = (count[position] ?? 0) + 1;
-    }
-
-    // If no jobs with salaries are found, return an empty list
-    if (salarySums.isEmpty) return [];
-    
-    final colorMap = {
-      'Software Developer': Color(0xFF42A5F5),
-      'AI/ML Engineer': Color(0xFFCE93D8),
-      'Data Science': Color(0xFFFFB74D),
-      'Data Engineer': Color(0xFF9CCC65),
-    };
-
-    final positionList = ['Software Developer', 'AI/ML Engineer', 'Data Science', 'Data Engineer', 'Other'];
-
-    return List.generate(positionList.length, (index) {
-      final position = positionList[index];
-      final totalSalary = salarySums[position] ?? 0;
-      final totalCount = count[position] ?? 0;
-      final avg = totalCount > 0 ? totalSalary / totalCount : 0;
-
-      return BarChartGroupData(
-        x: index,
-        barRods: [
-          BarChartRodData(
-            toY: avg / 1000,
-            color: colorMap[position] ?? Color(0xFFBDBDBD),
-          )
-        ],
-      );
-    });
-  }
-}
-
-class LegendItem extends StatelessWidget {
-  final Color color;
-  final String label;
-
-  const LegendItem({Key? key, required this.color, required this.label}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(width: 12, height: 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 14)),
-      ],
     );
   }
 }

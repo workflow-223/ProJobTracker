@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:pro_job_tracker/auth_service.dart'; // Ensure this points to your AuthService file
+import 'auth_service.dart';
 import 'navigation.dart';
 
 class LoginPage extends StatefulWidget {
@@ -34,20 +33,18 @@ class _LoginPageState extends State<LoginPage> {
       });
 
       try {
-        // Sign in with email and password using AuthService
         await _authService.signInWithEmailAndPassword(
           _emailController.text.trim(),
           _passwordController.text,
         );
 
-        // Navigate to the main screen
         if (mounted) {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => NavigationScreen()),
           );
         }
-      } on FirebaseAuthException catch (e) {
+      } on AuthException catch (e) {
         setState(() {
           _errorMessage = _getErrorMessage(e.code);
         });
@@ -61,31 +58,6 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _signInWithGoogle() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
-
-    try {
-      UserCredential? user = await _authService.signInWithGoogle();
-      if (user != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => NavigationScreen()),
-        );
-      }
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Google Sign-In failed. Please try again.';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
   String _getErrorMessage(String code) {
     switch (code) {
       case 'user-not-found':
@@ -94,10 +66,10 @@ class _LoginPageState extends State<LoginPage> {
         return 'Wrong password provided.';
       case 'invalid-email':
         return 'The email address is not valid.';
-      case 'user-disabled':
-        return 'This user has been disabled.';
+      case 'email-already-in-use':
+        return 'An account already exists for this email.';
       default:
-        return 'An error occurred during login. Please try again.';
+        return 'An error occurred. Please try again.';
     }
   }
 
@@ -159,31 +131,14 @@ class _LoginPageState extends State<LoginPage> {
               SizedBox(height: 30),
               _isLoading
                   ? CircularProgressIndicator(color: const Color(0xFF8CB0DF))
-                  : Column(
-                      children: [
-                        ElevatedButton(
-                          onPressed: _login,
-                          child: Text('Log In'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF8CB0DF),
-                            padding: EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                            textStyle: TextStyle(fontSize: 18),
-                          ),
-                        ),
-                        SizedBox(height: 10),
-                        ElevatedButton.icon(
-                          onPressed: _signInWithGoogle,
-                          icon: Image.asset('assets/google_logo.png', height: 24),
-                          label: Text('Sign in with Google'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.black,
-                            padding: EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                            textStyle: TextStyle(fontSize: 18),
-                            side: BorderSide(color: Colors.grey),
-                          ),
-                        ),
-                      ],
+                  : ElevatedButton(
+                      onPressed: _login,
+                      child: Text('Log In'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF8CB0DF),
+                        padding: EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                        textStyle: TextStyle(fontSize: 18),
+                      ),
                     ),
               SizedBox(height: 20),
               TextButton(
@@ -191,16 +146,6 @@ class _LoginPageState extends State<LoginPage> {
                   Navigator.pushNamed(context, '/create_account');
                 },
                 child: Text('Don\'t have an account? Create one'),
-              ),
-              SizedBox(height: 10),
-              TextButton(
-                onPressed: () {
-                  _authService.sendPasswordResetEmail(_emailController.text.trim());
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Password reset email sent.'), backgroundColor: Colors.green),
-                  );
-                },
-                child: Text('Forgot password?'),
               ),
             ],
           ),

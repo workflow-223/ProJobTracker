@@ -1,16 +1,16 @@
-# pro_job_tracker
+# Pro Job Tracker
 
-A new Flutter project.
+Cross-platform Flutter app for tracking job applications with status stages, dashboards, calendar view, and charts for visualizing progress.
 
-## Getting Started
+## Deployment
 
-This project is a starting point for a Flutter application.
+The web version is deployed to GitHub Pages at:
+`https://workflow-223.github.io/projobtracker/`
 
-A few resources to get you started if this is your first Flutter project:
+## Local Setup
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter pub get
+flutter run    # Runs on connected device/emulator
+flutter build web --base-href /projobtracker/
+```

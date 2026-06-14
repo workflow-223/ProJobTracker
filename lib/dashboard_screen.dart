@@ -1,23 +1,30 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'ae.dart'; // Using the original ae.dart
+import 'auth_service.dart';
+import 'database_service.dart';
+import 'ae.dart';
 import 'job_detail_popup.dart';
 
 class DashboardScreen extends StatefulWidget {
+  final VoidCallback? onJobChanged;
+
+  const DashboardScreen({Key? key, this.onJobChanged}) : super(key: key);
+
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  // Status list for the tabs
   final List<String> _statusList = ['Applied', 'Interviewed', 'Rejected', 'Accepted'];
+  int _refreshKey = 0;
 
-  // Current selected tab
-  int _selectedIndex = 0;
+  int? get _userId => AuthService().userId;
 
-  // Get current user's email
-  String? get _currentUserEmail => FirebaseAuth.instance.currentUser?.email;
+  void _refresh() {
+    setState(() {
+      _refreshKey++;
+    });
+    widget.onJobChanged?.call();
+  }
 
   void _navigateToAddJobScreen() {
     Navigator.push(
@@ -25,29 +32,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
       MaterialPageRoute(
         builder: (context) => AddEditJobScreen(
           onSubmit: (_) {
-            // Refresh the dashboard after a job is added.
-            setState(() {});
+            _refresh();
           },
         ),
       ),
     );
   }
 
-  // Navigate to edit job screen.
-  // We now pass the jobId as part of the job map (using the key 'id') so that AddEditJobScreen
-  // can detect an update scenario.
-  void _navigateToEditJobScreen(Map<String, dynamic> job, String jobId) {
-    Navigator.pop(context); // Close the detail popup
+  void _navigateToEditJobScreen(Map<String, dynamic> job, int jobId) {
+    Navigator.pop(context);
 
     final formattedJob = {
-      'id': jobId, // include the job id for updating
+      'id': jobId.toString(),
       'company': job['company'] ?? '',
       'position': job['position'] ?? '',
-      'dateApplied': job['dateApplied'] ?? '',
+      'dateApplied': job['date_applied'] ?? '',
       'deadline': job['deadline'] ?? '',
       'notes': job['notes'] ?? '',
       'status': job['status'] ?? 'Applied',
-      'salary': job['salary'] ?.toString() ?? '',
+      'salary': (job['salary'] ?? 0).toString(),
     };
 
     Navigator.push(
@@ -56,17 +59,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (context) => AddEditJobScreen(
           job: formattedJob,
           onSubmit: (_) {
-            // Refresh the dashboard after a job is updated.
-            setState(() {});
+            _refresh();
           },
         ),
       ),
     );
   }
 
+  Future<List<Map<String, dynamic>>> _fetchJobs() async {
+    if (_userId == null) return [];
+    return await DatabaseService.getJobsByUserId(_userId!);
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_currentUserEmail == null) {
+    if (_userId == null) {
       return Center(child: Text('Please log in to view your jobs'));
     }
 
@@ -78,15 +85,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           padding: EdgeInsets.all(16),
           child: Column(
             children: [
-              // TabBar without AppBar
               TabBar(
                 indicatorColor: Colors.blue,
                 labelColor: Colors.blue,
                 unselectedLabelColor: Colors.black,
                 onTap: (index) {
-                  setState(() {
-                    _selectedIndex = index;
-                  });
+                  setState(() {});
                 },
                 tabs: _statusList.map((status) {
                   return Tab(text: status);
@@ -111,14 +115,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Build the list of jobs from Firestore - filter by user email and status
   Widget _buildJobsList(String status) {
-    return StreamBuilder<QuerySnapshot>(
-      // Query Firestore for jobs with the current user's email
-      stream: FirebaseFirestore.instance
-          .collection('jobs')
-          .where('email', isEqualTo: _currentUserEmail)
-          .snapshots(),
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      key: ValueKey(_refreshKey),
+      future: _fetchJobs(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(child: CircularProgressIndicator());
@@ -128,28 +128,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
 
-        final allJobs = snapshot.data?.docs ?? [];
-        
-        // Filter by status in memory
-        final jobs = allJobs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          return data['status'] == status;
-        }).toList();
-        
-        // Sort by updatedAt in descending order in memory
-        jobs.sort((a, b) {
-          final aData = a.data() as Map<String, dynamic>;
-          final bData = b.data() as Map<String, dynamic>;
-          
-          final aTimestamp = aData['updatedAt'] as Timestamp?;
-          final bTimestamp = bData['updatedAt'] as Timestamp?;
-          
-          if (aTimestamp == null && bTimestamp == null) return 0;
-          if (aTimestamp == null) return 1; // nulls last
-          if (bTimestamp == null) return -1;
-          
-          return bTimestamp.compareTo(aTimestamp);
-        });
+        final allJobs = snapshot.data ?? [];
+        final jobs = allJobs.where((job) => job['status'] == status).toList();
 
         if (jobs.isEmpty) {
           return Center(
@@ -163,15 +143,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return ListView.builder(
           itemCount: jobs.length,
           itemBuilder: (context, index) {
-            final job = jobs[index].data() as Map<String, dynamic>;
-            final jobId = jobs[index].id;
+            final job = jobs[index];
+            final jobId = job['id'] as int;
 
             return GestureDetector(
               onTap: () => _showJobDetails(job, jobId),
               child: JobCard(
                 title: job['position'] ?? 'No Title',
                 company: job['company'] ?? 'No Company',
-                dateApplied: job['dateApplied'] ?? 'No Date',
+                dateApplied: job['date_applied'] ?? 'No Date',
                 deadline: job['deadline'] ?? 'No Deadline',
                 status: job['status'] ?? 'No Status',
               ),
@@ -182,21 +162,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Show job details in a popup
-  void _showJobDetails(Map<String, dynamic> job, String jobId) {
+  void _showJobDetails(Map<String, dynamic> job, int jobId) {
     showDialog(
       context: context,
       builder: (context) => JobDetailPopup(
         job: job,
-        jobId: jobId,
+        jobId: jobId.toString(),
         onEdit: () => _navigateToEditJobScreen(job, jobId),
         onDelete: () => _confirmDelete(jobId),
       ),
     );
   }
 
-  // Confirm delete dialog
-  Future<void> _confirmDelete(String jobId) async {
+  Future<void> _confirmDelete(int jobId) async {
     return showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -210,8 +188,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             TextButton(
               onPressed: () {
-                Navigator.of(context).pop(); // Close confirmation dialog
-                Navigator.of(context).pop(); // Close detail popup
+                Navigator.of(context).pop();
+                Navigator.of(context).pop();
                 _deleteJob(jobId);
               },
               child: Text("Delete", style: TextStyle(color: Colors.red)),
@@ -222,10 +200,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Delete a job from Firestore
-  Future<void> _deleteJob(String jobId) async {
+  Future<void> _deleteJob(int jobId) async {
     try {
-      await FirebaseFirestore.instance.collection('jobs').doc(jobId).delete();
+      await DatabaseService.deleteJob(jobId);
+      _refresh();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Job deleted successfully!')),
       );
@@ -305,7 +283,6 @@ class JobCard extends StatelessWidget {
     );
   }
 
-  // Get color for the status
   Color _getStatusColor() {
     switch (status) {
       case 'Applied':
