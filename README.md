@@ -7,7 +7,7 @@ Cross-platform Flutter app for tracking job applications with status stages, das
 The web version is deployed to GitHub Pages at:
 `https://workflow-223.github.io/projobtracker/`
 
-**Setup:** In repo Settings → Pages → Source: **Deploy from a branch**, branch: `gh-pages`, folder: `/ (root)`.
+**Setup:** In repo Settings → Pages → Source: **GitHub Actions**.
 
 ## Local Setup
 
